@@ -69,6 +69,12 @@ async def run_now(request: Request) -> dict:
             job_store.succeed(job_id, result)
             invalidate_storage_cache()
             repo.refresh_cache()  # 刷新 Polars 缓存
+            from app.extensions.loader import dispatch_post_pipeline_hooks
+
+            dispatch_post_pipeline_hooks(
+                getattr(request.app.state, "extension_registry", None),
+                result,
+            )
         except JobCancelledError:
             # 已被 reap/手动取消终止: job 状态已由 terminate() 写为 failed,
             # 拉取线程在分块回调处自行退出, 这里无需(也无法)再写状态。

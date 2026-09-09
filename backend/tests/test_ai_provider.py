@@ -393,8 +393,9 @@ async def test_generate_ai_text_clamps_max_tokens_to_config_cap(monkeypatch):
     monkeypatch.setattr(ai_provider, "current_ai_max_output_tokens", lambda: 3000)
     monkeypatch.setattr(ai_provider, "current_ai_context_window", lambda: 64000)
 
-    async def fake_run(messages, *, temperature, max_tokens, timeout):
+    async def fake_run(messages, *, temperature, max_tokens, timeout, prefer_final_answer):
         captured["max_tokens"] = max_tokens
+        captured["prefer_final_answer"] = prefer_final_answer
         return "ok"
 
     monkeypatch.setattr(ai_provider, "_run_openai_once", fake_run)
@@ -403,6 +404,7 @@ async def test_generate_ai_text_clamps_max_tokens_to_config_cap(monkeypatch):
     )
     assert text == "ok"
     assert captured["max_tokens"] == 3000
+    assert captured["prefer_final_answer"] is False
 
 
 @pytest.mark.asyncio
@@ -413,8 +415,9 @@ async def test_generate_ai_text_default_cap_and_none_passthrough(monkeypatch):
     monkeypatch.setattr(ai_provider, "current_ai_max_output_tokens", lambda: 4000)
     monkeypatch.setattr(ai_provider, "current_ai_context_window", lambda: 64000)
 
-    async def fake_run(messages, *, temperature, max_tokens, timeout):
+    async def fake_run(messages, *, temperature, max_tokens, timeout, prefer_final_answer):
         captured["max_tokens"] = max_tokens
+        captured["prefer_final_answer"] = prefer_final_answer
         return "ok"
 
     monkeypatch.setattr(ai_provider, "_run_openai_once", fake_run)
@@ -424,6 +427,35 @@ async def test_generate_ai_text_default_cap_and_none_passthrough(monkeypatch):
         [{"role": "user", "content": "hi"}], max_tokens=None,
     )
     assert captured["max_tokens"] is None  # None = 推理模型放开, 不钳制
+
+    await ai_provider.generate_ai_text(
+        [{"role": "user", "content": "hi"}], prefer_final_answer=True,
+    )
+    assert captured["prefer_final_answer"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_openai_once_rejects_reasoning_only_response(monkeypatch):
+    async def create(**kwargs):
+        del kwargs
+        message = SimpleNamespace(content="", reasoning_content="内部推理")
+        choice = SimpleNamespace(message=message, finish_reason="length")
+        return SimpleNamespace(choices=[choice])
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(ai_provider.secrets_store, "get_ai_key", lambda: "test-key")
+    monkeypatch.setattr(ai_provider, "_openai_client", lambda _key, _timeout: client)
+    monkeypatch.setattr(ai_provider, "current_ai_model", lambda: "reasoning-model")
+
+    with pytest.raises(RuntimeError, match="推理达到输出长度上限"):
+        await ai_provider._run_openai_once(
+            [{"role": "user", "content": "hi"}],
+            temperature=0.1,
+            max_tokens=100,
+            timeout=10,
+        )
 
 
 def test_save_ai_settings_persists_token_sizes(monkeypatch):

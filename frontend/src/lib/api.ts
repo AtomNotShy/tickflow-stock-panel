@@ -25,6 +25,92 @@ export class ApiError extends Error {
   }
 }
 
+export interface AiResearchRun {
+  id: string
+  as_of: string
+  started_at: string
+  completed_at?: string | null
+  status: 'running' | 'completed' | 'failed' | 'skipped'
+  trigger: string
+  model?: string | null
+  input_count: number
+  decision_count: number
+  market_summary?: string | null
+  error?: string | null
+}
+
+export interface AiResearchCandidate {
+  id: string
+  anomaly_key: string
+  symbol: string
+  name?: string | null
+  state: string
+  score: number
+  confidence: number
+  horizon_days: number
+  thesis: string
+  evidence: string[]
+  impact_path: string[]
+  fundamental_view: string
+  expectation_view: string
+  technical_view: string
+  risks: string[]
+  discovered_on: string
+  last_seen_on: string
+  expires_on: string
+}
+
+export interface AiResearchStatus {
+  configured: boolean
+  running: boolean
+  methodology_version: string
+  latest_run?: AiResearchRun | null
+  candidate_counts: Record<string, number>
+  account_snapshot?: {
+    as_of: string
+    cash: number
+    market_value: number
+    equity: number
+    exposure: number
+    positions: number
+  } | null
+  config: Record<string, string | number>
+}
+
+export interface AiResearchPortfolio {
+  account: { cash: number; initial_capital: number } | null
+  positions: Array<{
+    symbol: string; name?: string | null; quantity: number; entry_date: string
+    entry_price: number; last_price: number; hold_days: number; candidate_id?: string | null
+  }>
+  orders: Array<{
+    id: string; symbol: string; name?: string | null; side: 'buy' | 'sell'
+    state: 'pending' | 'filled' | 'cancelled'; signal_date: string; fill_date?: string | null
+    fill_price?: number | null; quantity?: number | null; reason: string
+    blocked_reason?: string | null
+  }>
+  trades: Array<{
+    id: string; symbol: string; name?: string | null; entry_date: string; exit_date: string
+    entry_price: number; exit_price: number; quantity: number; net_pnl: number
+    return_pct: number; duration: number; exit_reason: string
+  }>
+  equity_curve: Array<{ as_of: string; equity: number; exposure: number; positions: number }>
+}
+
+export interface AiResearchEvaluation {
+  selection_summary: Array<{
+    horizon_days: number; sample_count: number; wins: number; avg_return_pct: number | null
+    avg_excess_return_pct: number | null
+  }>
+  execution_summary: {
+    trade_count: number; wins: number | null; net_pnl: number | null; avg_return_pct: number | null
+  } | null
+  outcomes: Array<{
+    id: string; symbol: string; name?: string | null; thesis: string; signal_date: string
+    horizon_days: number; status: 'pending' | 'complete'; return_pct?: number | null
+  }>
+}
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 /** 同步计算型接口 (回测/筛选等) 的放宽超时: 合法耗时可能远超轮询类接口。 */
 const COMPUTE_REQUEST_TIMEOUT_MS = 300_000
@@ -1878,6 +1964,14 @@ export interface StrategyAlertEvent {
 // ===== API surface =====
 export const api = {
   health: () => request<{ status: string; version: string; mode: string }>('/health'),
+
+  aiResearchStatus: () => request<AiResearchStatus>('/api/custom/ai-research/status'),
+  aiResearchCandidates: () =>
+    request<{ items: AiResearchCandidate[]; count: number }>('/api/custom/ai-research/candidates'),
+  aiResearchPortfolio: () => request<AiResearchPortfolio>('/api/custom/ai-research/portfolio'),
+  aiResearchEvaluation: () => request<AiResearchEvaluation>('/api/custom/ai-research/evaluation'),
+  aiResearchRun: () =>
+    request<{ enqueued: boolean; reused: boolean }>('/api/custom/ai-research/run', { method: 'POST' }),
 
   // ===== Auth (访问认证) =====
   authStatus: () =>

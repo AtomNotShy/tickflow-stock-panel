@@ -10,8 +10,10 @@ from app.extensions.contracts import (
     BACKEND_EXTENSION_API_VERSION,
     NotificationFormatContext,
     NotificationFormatter,
+    PipelineCompletedContext,
+    PostPipelineHook,
 )
-from app.extensions.loader import configure_backend_extensions
+from app.extensions.loader import configure_backend_extensions, dispatch_post_pipeline_hooks
 from app.extensions.registry import BackendExtensionRegistrar, BackendExtensionRegistry
 from app.services.quote_service import QuoteService
 
@@ -29,6 +31,20 @@ class BrokenFormatter(NotificationFormatter):
     def format_message(self, event: dict, context: NotificationFormatContext) -> str:
         del event, context
         raise RuntimeError("broken formatter")
+
+
+class RecordingPipelineHook(PostPipelineHook):
+    def __init__(self, calls: list[str], label: str, *, broken: bool = False) -> None:
+        self.calls = calls
+        self.label = label
+        self.broken = broken
+
+    def after_pipeline(self, context: PipelineCompletedContext) -> None:
+        assert context.api_version == BACKEND_EXTENSION_API_VERSION
+        assert context.result["rows"] == 42
+        self.calls.append(self.label)
+        if self.broken:
+            raise RuntimeError("hook failed")
 
 
 def _registrar(extension_id: str = "company.test") -> BackendExtensionRegistrar:
@@ -105,6 +121,27 @@ def test_registry_is_frozen_after_startup() -> None:
 
     with pytest.raises(RuntimeError, match="frozen"):
         registry.register(_registrar())
+
+
+def test_post_pipeline_hooks_are_ordered_and_failure_isolated() -> None:
+    calls: list[str] = []
+    registry = BackendExtensionRegistry()
+    registrar = _registrar()
+    registrar.register_post_pipeline_hook(
+        "company.last", RecordingPipelineHook(calls, "last"), order=30
+    )
+    registrar.register_post_pipeline_hook(
+        "company.broken", RecordingPipelineHook(calls, "broken", broken=True), order=20
+    )
+    registrar.register_post_pipeline_hook(
+        "company.first", RecordingPipelineHook(calls, "first"), order=10
+    )
+    registry.register(registrar)
+    registry.freeze()
+
+    dispatch_post_pipeline_hooks(registry, {"rows": 42})
+
+    assert calls == ["first", "broken", "last"]
 
 
 def test_loader_isolates_failed_setup_and_registers_valid_route(

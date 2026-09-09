@@ -4,12 +4,19 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from app.extensions.contracts import BACKEND_EXTENSION_API_VERSION, ExtensionContext
+from app.extensions.contracts import (
+    BACKEND_EXTENSION_API_VERSION,
+    ExtensionContext,
+    PipelineCompletedContext,
+)
 from app.extensions.registry import BackendExtensionRegistrar, BackendExtensionRegistry
 
 logger = logging.getLogger(__name__)
@@ -109,3 +116,22 @@ def current_extension_context(*, data_dir, repository) -> ExtensionContext:
         data_dir=data_dir,
         repository=repository,
     )
+
+
+def dispatch_post_pipeline_hooks(
+    registry: BackendExtensionRegistry | None,
+    result: Mapping[str, Any] | None,
+) -> None:
+    """Notify registered extensions without changing the successful pipeline outcome."""
+    if registry is None:
+        return
+    context = PipelineCompletedContext(
+        api_version=BACKEND_EXTENSION_API_VERSION,
+        completed_at=datetime.now(UTC),
+        result=dict(result or {}),
+    )
+    for item in registry.post_pipeline_hooks():
+        try:
+            item.implementation.after_pipeline(context)
+        except Exception:
+            logger.exception("post-pipeline hook failed: %s", item.implementation_id)

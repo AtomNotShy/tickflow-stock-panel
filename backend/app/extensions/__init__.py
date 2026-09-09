@@ -3,6 +3,8 @@ from app.extensions.contracts import (
     ExtensionContext,
     NotificationFormatContext,
     NotificationFormatter,
+    PipelineCompletedContext,
+    PostPipelineHook,
 )
 from app.extensions.registry import BackendExtensionRegistrar, BackendExtensionRegistry
 
@@ -13,4 +15,6 @@ __all__ = [
     "ExtensionContext",
     "NotificationFormatContext",
     "NotificationFormatter",
+    "PipelineCompletedContext",
+    "PostPipelineHook",
 ]

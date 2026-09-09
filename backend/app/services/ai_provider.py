@@ -300,6 +300,7 @@ async def generate_ai_text(
     temperature: float | None = 0.3,
     max_tokens: int | None = 3000,
     timeout: float = 180.0,
+    prefer_final_answer: bool = False,
 ) -> str:
     """Return a complete AI response from the currently configured provider.
 
@@ -317,6 +318,7 @@ async def generate_ai_text(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        prefer_final_answer=prefer_final_answer,
     )
 
 
@@ -358,6 +360,7 @@ async def _run_openai_once(
     temperature: float | None,
     max_tokens: int | None,
     timeout: float,
+    prefer_final_answer: bool = False,
 ) -> str:
     ai_key = secrets_store.get_ai_key()
     if not ai_key:
@@ -366,7 +369,14 @@ async def _run_openai_once(
     client = _openai_client(ai_key, timeout)
     model = current_ai_model()
     req_messages = list(messages)
-    kwargs = _openai_kwargs(temperature=temperature, max_tokens=max_tokens)
+    base_url = secrets_store.get_ai_config("ai_base_url", "") or settings.ai_base_url
+    kwargs = _openai_kwargs(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model=model,
+        base_url=base_url,
+        prefer_final_answer=prefer_final_answer,
+    )
     while True:
         try:
             resp = await client.chat.completions.create(
@@ -384,8 +394,22 @@ async def _run_openai_once(
                 raise RuntimeError(_format_openai_error(exc)) from exc
             raise
     if not resp.choices:
-        return ""
-    return (resp.choices[0].message.content or "").strip()
+        raise RuntimeError("AI 服务未返回任何候选结果; 请检查模型配置或稍后重试")
+    choice = resp.choices[0]
+    content = (choice.message.content or "").strip()
+    reasoning_seen = bool(getattr(choice.message, "reasoning_content", None))
+    finish_reason = str(getattr(choice, "finish_reason", None) or "")
+    if finish_reason in _LENGTH_FINISH_REASONS:
+        if reasoning_seen and not content:
+            raise RuntimeError(
+                "AI 推理达到输出长度上限, 未生成正文; 请提高输出 Token 上限或改用非推理模型"
+            )
+        raise RuntimeError("AI 输出达到长度上限, 内容不完整; 请提高输出 Token 上限后重试")
+    if not content:
+        if reasoning_seen:
+            raise RuntimeError("AI 仅返回推理内容, 未生成正文; 请检查模型配置或改用非推理模型")
+        raise RuntimeError("AI 服务未返回正文内容; 请检查模型配置或稍后重试")
+    return content
 
 
 async def _stream_openai(

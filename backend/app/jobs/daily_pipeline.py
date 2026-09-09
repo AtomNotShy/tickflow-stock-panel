@@ -835,7 +835,7 @@ def _push_phase_change_alert(data_dir) -> None:
     logger.info("phase change alert: %s (severity=%s)", msg, severity)
 
 
-def _run_tracked(fn, job_label: str) -> bool:
+def _run_tracked(fn, job_label: str, on_success=None) -> bool:
     """调度触发时包装 JobStore 跟踪，确保同步历史有记录。
 
     单飞: 若已有活跃(pending∨running)任务(手动同步中), 本次调度直接跳过, 不并发。
@@ -858,6 +858,7 @@ def _run_tracked(fn, job_label: str) -> bool:
         job_store.progress(job_id, stage, pct, msg, stage_pct=stage_pct, skip_log=skip_log)
 
     succeeded = False
+    result = None
     try:
         job_store.start(job_id)
         result = fn(on_progress=progress)
@@ -872,12 +873,26 @@ def _run_tracked(fn, job_label: str) -> bool:
         job_store.fail(job_id, f"scheduled {job_label} failed")
     finally:
         release_run_slot(job_id)
+    if succeeded and on_success is not None:
+        try:
+            on_success(result)
+        except Exception:
+            logger.exception("scheduled %s success callback failed", job_label)
     return succeeded
 
 
 def _scheduled_pipeline_task(pipeline_fn) -> None:
     """Run weekly mining only after the tracked daily pipeline has fully succeeded."""
-    if not _run_tracked(pipeline_fn, "daily_pipeline"):
+    def _notify_extensions(result) -> None:
+        from app.extensions.loader import dispatch_post_pipeline_hooks
+
+        app_state = _get_app_state()
+        dispatch_post_pipeline_hooks(
+            getattr(app_state, "extension_registry", None) if app_state else None,
+            result,
+        )
+
+    if not _run_tracked(pipeline_fn, "daily_pipeline", _notify_extensions):
         return
     try:
         from app.services.mining_schedule import run_weekly_mining

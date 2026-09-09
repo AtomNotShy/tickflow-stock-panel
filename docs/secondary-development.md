@@ -19,9 +19,9 @@
 - 数据源 Provider 与 `plugin.yaml` 机制：详见 [`plugin-development.md`](plugin-development.md)。
 - 扩展数据与声明式分析页面：适合不需要自定义 React 交互的页面。
 - 前端源码扩展注册：`frontend/src/custom/<namespace>/extension.tsx`，支持静态页面、导航和已开放插槽。
-- 后端源码扩展注册：`backend/app/custom/<module>.py`，支持 FastAPI 路由、启动钩子和通知格式化器。
+- 后端源码扩展注册：`backend/app/custom/<module>.py`，支持 FastAPI 路由、启动钩子、通知格式化器和盘后管道成功钩子。
 - 当前前端插槽：`layout.navigation.extra`、`stock-preview.footer`、`watchlist.toolbar`。
-- 当前后端继承点：`NotificationFormatter`。
+- 当前后端继承点：`NotificationFormatter`、`PostPipelineHook`。
 - 因子平台与策略线的既有桥接（已实现，二开时直接复用、勿重复实现）：因子库一键生成单因子排名策略（`GenerateFactorStrategyDialog` → `custom_factor_*`）；策略触发器引用因子条件信号（`AddFactorSignalDialog`，`csg_f_*`）；自定义信号 AI 提示词含因子分组（`custom_signals_ai.py`）；策略回测因子归因（`strategy.py` 的 `factor_attribution`，覆盖 `meta.scoring` 非空的策略）。
 
 尚未实现、只能在真实需求出现后增加的能力：
@@ -172,6 +172,7 @@ const extension: FrontendExtension = {
 当前已经实现的继承点：
 
 - `NotificationFormatter`：在监控规则完成评估后统一调整通知文案，不改变事件结构和触发语义。
+- `PostPipelineHook`：日线管道成功落盘且缓存刷新后触发；实现只能快速入队，耗时研究必须在扩展自己的后台任务中执行。失败不会改变管道成功状态。
 
 下列是可能适合的小粒度接口，但目前没有实现，不能直接导入：
 

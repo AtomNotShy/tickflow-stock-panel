@@ -11,6 +11,7 @@ from app.extensions.contracts import (
     BACKEND_EXTENSION_API_VERSION,
     DefaultNotificationFormatter,
     NotificationFormatter,
+    PostPipelineHook,
 )
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
@@ -33,6 +34,7 @@ class BackendExtensionRegistrar:
         self.api_version = api_version
         self.routers: list[APIRouter] = []
         self.notification_formatters: list[tuple[str, NotificationFormatter, int]] = []
+        self.post_pipeline_hooks: list[tuple[str, PostPipelineHook, int]] = []
 
     def include_router(self, router: APIRouter) -> None:
         if not isinstance(router, APIRouter):
@@ -48,11 +50,21 @@ class BackendExtensionRegistrar:
     ) -> None:
         self.notification_formatters.append((implementation_id, formatter, order))
 
+    def register_post_pipeline_hook(
+        self,
+        implementation_id: str,
+        hook: PostPipelineHook,
+        *,
+        order: int = 100,
+    ) -> None:
+        self.post_pipeline_hooks.append((implementation_id, hook, order))
+
 
 class BackendExtensionRegistry:
     def __init__(self) -> None:
         self._extension_ids: set[str] = set()
         self._notification_formatters: list[RegisteredImplementation[NotificationFormatter]] = []
+        self._post_pipeline_hooks: list[RegisteredImplementation[PostPipelineHook]] = []
         self._frozen = False
 
     @property
@@ -102,13 +114,34 @@ class BackendExtensionRegistry:
                 RegisteredImplementation(extension_id, implementation_id, formatter, order)
             )
 
+        known_hook_ids = {item.implementation_id for item in self._post_pipeline_hooks}
+        staged_hook_ids: set[str] = set()
+        staged_hooks: list[RegisteredImplementation[PostPipelineHook]] = []
+        for implementation_id, hook, order in registrar.post_pipeline_hooks:
+            self._validate_id(implementation_id, "implementation_id")
+            if not isinstance(hook, PostPipelineHook):
+                raise TypeError("hook must inherit PostPipelineHook")
+            if hook.api_version != BACKEND_EXTENSION_API_VERSION:
+                raise ValueError(
+                    f"post-pipeline hook {implementation_id!r} requires API v{hook.api_version}; "
+                    f"current is v{BACKEND_EXTENSION_API_VERSION}"
+                )
+            if implementation_id in known_hook_ids or implementation_id in staged_hook_ids:
+                raise ValueError(f"duplicate post-pipeline hook id: {implementation_id}")
+            staged_hook_ids.add(implementation_id)
+            staged_hooks.append(
+                RegisteredImplementation(extension_id, implementation_id, hook, order)
+            )
+
         self._extension_ids.add(extension_id)
         self._notification_formatters.extend(staged)
+        self._post_pipeline_hooks.extend(staged_hooks)
 
     def freeze(self) -> None:
         self._notification_formatters.sort(
             key=lambda item: (item.order, item.implementation_id)
         )
+        self._post_pipeline_hooks.sort(key=lambda item: (item.order, item.implementation_id))
         self._frozen = True
 
     def notification_formatters(
@@ -123,6 +156,13 @@ class BackendExtensionRegistry:
                 ),
             )
         return tuple(self._notification_formatters)
+
+    def post_pipeline_hooks(
+        self,
+    ) -> tuple[RegisteredImplementation[PostPipelineHook], ...]:
+        if not self._frozen:
+            raise RuntimeError("backend extension registry must be frozen before use")
+        return tuple(self._post_pipeline_hooks)
 
     def _ensure_mutable(self) -> None:
         if self._frozen:
