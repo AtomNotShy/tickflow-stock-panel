@@ -106,16 +106,26 @@ RUN if [ "$USE_CN_MIRROR" = "1" ]; then \
 # Backend deps
 COPY README.md /README.md
 COPY backend/pyproject.toml backend/uv.lock* ./
-# uv 原生支持同时挂多个 index(主源 + 备用源),会自动在两源中查找,
-# 比逐个重试更稳健 —— 任一源缺包时另一源补位。
-RUN if [ "$USE_CN_MIRROR" = "1" ]; then \
-      export UV_DEFAULT_INDEX="$PYPI_INDEX" UV_EXTRA_INDEX_URL="$PYPI_FALLBACK"; \
-    fi; \
-    set -- --no-dev; \
+# uv.lock 会记录 wheel 的完整下载 URL。仅设置 EXTRA_INDEX 无法在已锁定的
+# wheel 下载超时时切源，因此每次重试先把容器内的 lock 重新绑定到目标索引，
+# 再按同一组锁定版本安装。源顺序:清华 → 阿里 → 官方 PyPI。
+RUN set -- --no-dev; \
     for extra in $BACKEND_EXTRAS; do \
       set -- "$@" --extra "$extra"; \
     done; \
-    uv sync --frozen "$@" || uv sync "$@"
+    sync_from_index() { \
+      index="$1"; \
+      shift; \
+      uv lock --default-index "$index" \
+        && uv sync --frozen --default-index "$index" "$@"; \
+    }; \
+    if [ "$USE_CN_MIRROR" = "1" ]; then \
+      sync_from_index "$PYPI_INDEX" "$@" \
+        || sync_from_index "$PYPI_FALLBACK" "$@" \
+        || sync_from_index "https://pypi.org/simple" "$@"; \
+    else \
+      sync_from_index "https://pypi.org/simple" "$@"; \
+    fi
 
 # Backend code
 # 注意:Docker 里 WORKDIR=/app, 而 config.py 的 _PROJECT_ROOT 是按开发布局
@@ -141,15 +151,10 @@ COPY --from=codex-builder /opt/codex-native /usr/local/bin/codex
 RUN codex --version
 
 ENV PYTHONPATH=/app
-# 运行时 uv 镜像源持久化: CMD 用 `uv run` 启动, 锁与 pyproject 不一致等场景下
-# uv 会在容器内重新解析/安装 —— 无源配置时默认 pypi.org, 国内网络会卡死启动
-# (实测阿里云 ECS)。与构建期 RUN 内的 export 同源, 这里让它跨层存活。
-ARG PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
-ARG PYPI_FALLBACK=https://mirrors.aliyun.com/pypi/simple
-ENV UV_DEFAULT_INDEX=${PYPI_INDEX} \
-    UV_EXTRA_INDEX_URL=${PYPI_FALLBACK}
+# 依赖已经在镜像构建阶段同步完成。直接运行虚拟环境中的 uvicorn，避免容器
+# 每次启动时由 `uv run` 再次解析 lock 或访问构建时选用的包索引。
 # 兜底时区: 交易时段判断已在代码里显式用北京时间 (app/market_time.py),
 # 此处让日志时间戳等其余 naive 时间也对齐北京时间。
 ENV TZ=Asia/Shanghai
 EXPOSE 3018
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3018"]
+CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3018"]

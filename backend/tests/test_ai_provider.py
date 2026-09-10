@@ -498,6 +498,19 @@ def test_save_ai_settings_rejects_non_positive(monkeypatch):
         settings_api.save_ai_settings(req2)
 
 
+def test_save_ai_settings_reserves_context_for_input() -> None:
+    from app.api import settings as settings_api
+    from fastapi import HTTPException
+
+    req = settings_api.AiSettingsIn(
+        provider="openai_compat",
+        max_output_tokens=84_000,
+        context_window=84_000,
+    )
+    with pytest.raises(HTTPException, match="输出上限必须小于上下文总窗口"):
+        settings_api.save_ai_settings(req)
+
+
 async def _fake_openai_stream(*chunks):
     for chunk in chunks:
         yield chunk

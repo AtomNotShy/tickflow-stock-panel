@@ -6,6 +6,10 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-1}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PYPI_INDEX: ${PYPI_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PYPI_FALLBACK: ${PYPI_FALLBACK:-https://mirrors.aliyun.com/pypi/simple}
         BACKEND_EXTRAS: ${BACKEND_EXTRAS:-}
         CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:-0.144.3}
     container_name: TickFlow_Stock_Panel

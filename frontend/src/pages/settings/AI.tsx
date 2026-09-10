@@ -468,10 +468,10 @@ export function SettingsAIPanel({ highlight }: { highlight?: string } = {}) {
 
           <div className="border-t border-border/20 pt-4">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="输出上限 max_tokens" hint="所有 AI 任务的输出 token 上限, 任务请求会被钳制到此值; 默认 8192">
+              <Field label="单次输出上限 max_tokens" hint="限制一次模型响应，不是输入窗口。AI 研究会自动分批；DeepSeek V4 通常使用 8192–16384">
                 <input type="number" min={1} value={maxOutputTokens} onChange={e => setMaxOutputTokens(e.target.value)} placeholder="8192" className={INPUT_CLS} />
               </Field>
-              <Field label="上下文窗口 (输入上限)" hint="输入估算超出此窗口时会报错并提示调大; 默认 64000">
+              <Field label="上下文总窗口 (输入 + 输出)" hint="模型一次请求的总 token 容量；必须大于输入估算与单次输出上限之和">
                 <input type="number" min={1} value={contextWindow} onChange={e => setContextWindow(e.target.value)} placeholder="64000" className={INPUT_CLS} />
               </Field>
             </div>

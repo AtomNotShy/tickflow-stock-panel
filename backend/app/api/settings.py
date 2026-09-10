@@ -266,6 +266,8 @@ def save_ai_settings(req: AiSettingsIn) -> dict:
     from app.services.ai_provider import (
         OPENAI_PROVIDER,
         ai_configured,
+        current_ai_context_window,
+        current_ai_max_output_tokens,
         current_ai_model,
         current_ai_provider,
         current_codex_command,
@@ -273,14 +275,32 @@ def save_ai_settings(req: AiSettingsIn) -> dict:
         current_codex_reasoning_effort,
         current_openai_model,
         current_openai_reasoning_effort,
-        current_ai_context_window,
-        current_ai_max_output_tokens,
         normalize_codex_command,
         normalize_codex_model,
         normalize_codex_reasoning_effort,
     )
 
     updates: dict = {}
+    next_max_output = (
+        req.max_output_tokens
+        if req.max_output_tokens is not None
+        else current_ai_max_output_tokens()
+    )
+    next_context_window = (
+        req.context_window
+        if req.context_window is not None
+        else current_ai_context_window()
+    )
+    if next_max_output <= 0:
+        raise HTTPException(status_code=400, detail="输出上限必须为正整数")
+    if next_context_window <= 0:
+        raise HTTPException(status_code=400, detail="上下文窗口必须为正整数")
+    if next_max_output >= next_context_window:
+        raise HTTPException(
+            status_code=400,
+            detail="输出上限必须小于上下文总窗口, 并为输入内容预留空间",
+        )
+
     if req.provider:
         updates["ai_provider"] = req.provider
         settings.ai_provider = req.provider
@@ -317,13 +337,9 @@ def save_ai_settings(req: AiSettingsIn) -> dict:
 
     # 输出上限 / 输入上下文窗口 (数值配置, 缺省保持原值)
     if req.max_output_tokens is not None:
-        if req.max_output_tokens <= 0:
-            raise HTTPException(status_code=400, detail="输出上限必须为正整数")
         updates["ai_max_output_tokens"] = req.max_output_tokens
         settings.ai_max_output_tokens = req.max_output_tokens
     if req.context_window is not None:
-        if req.context_window <= 0:
-            raise HTTPException(status_code=400, detail="上下文窗口必须为正整数")
         updates["ai_context_window"] = req.context_window
         settings.ai_context_window = req.context_window
 
